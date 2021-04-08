@@ -159,7 +159,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release                             \
             -DBUILD_SHARED_LIBS=ON                                 \
             -DBUILD_CLAR=OFF                                       \
-            -DCMAKE_C_FLAGS=-fPIC
+            -DCMAKE_C_FLAGS=-fPIC                                  \
+            -DREGEX_BACKEND=builtin
           make
           sudo make install
         working-directory: ${{ runner.temp }}
