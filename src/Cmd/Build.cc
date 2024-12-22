@@ -40,19 +40,12 @@ runBuildCommand(
   const Command makeCmd = getMakeCommand().addArg("-C").addArg(outDir).addArg(
       (config.outBasePath / targetName).string()
   );
-  Command checkUpToDateCmd = makeCmd;
-  checkUpToDateCmd.addArg("--question");
-
-  int exitCode = execCmd(checkUpToDateCmd);
-  if (exitCode != EXIT_SUCCESS) {
-    // If `targetName` is not up-to-date, compile it.
-    logger::info(
-        "Compiling", "{} v{} ({})", targetName, getPackageVersion().toString(),
-        getProjectBasePath().string()
-    );
-    exitCode = execCmd(makeCmd);
-  }
-  return exitCode;
+  fs::remove(config.outBasePath / targetName);
+  logger::info(
+      "Compiling", "{} v{} ({})", targetName, getPackageVersion().toString(),
+      getProjectBasePath().string()
+  );
+  return execCmd(makeCmd);
 }
 
 int
