@@ -574,7 +574,8 @@ BuildConfig::collectBinDepObjs(  // NOLINT(misc-no-recursion)
 
 void
 BuildConfig::installDeps(const bool includeDevDeps) {
-  const std::vector<DepMetadata> deps = installDependencies(includeDevDeps);
+  const std::vector<DepMetadata> deps =
+      installDependencies(includeDevDeps, isDebug);
   for (const DepMetadata& dep : deps) {
     if (!dep.includes.empty()) {
       includes.push_back(replaceAll(dep.includes, "-I", "-isystem"));

@@ -69,4 +69,4 @@ const Version& getPackageVersion();
 const Profile& getDevProfile();
 const Profile& getReleaseProfile();
 const std::vector<std::string>& getLintCpplintFilters();
-std::vector<DepMetadata> installDependencies(bool includeDevDeps);
+std::vector<DepMetadata> installDependencies(bool includeDevDeps, bool isDebug);

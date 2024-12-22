@@ -1,6 +1,7 @@
 #include "Manifest.hpp"
 
 #include "Algos.hpp"
+#include "BuildConfig.hpp"
 #include "Exception.hpp"
 #include "Git2.hpp"
 #include "Logger.hpp"
@@ -124,21 +125,21 @@ struct GitDependency {
   std::string url;
   std::optional<std::string> target;
 
-  DepMetadata install() const;
+  DepMetadata install(bool isDebug) const;
 };
 
 struct PathDependency {
   std::string name;
   std::string path;
 
-  DepMetadata install() const;
+  DepMetadata install(bool isDebug) const;
 };
 
 struct SystemDependency {
   std::string name;
   VersionReq versionReq;
 
-  DepMetadata install() const;
+  DepMetadata install(bool /*unused*/) const;
 };
 
 using Dependency =
@@ -602,8 +603,75 @@ parseDependencies(const char* key) {
   return deps;
 }
 
+extern std::vector<std::string> CLI_ARGS;  // NOLINT
+                                           // defined in main.cc
+
+static std::string
+buildPoac(
+    const std::string_view name, const fs::path& installDir, bool isDebug
+) {
+  const auto poacToml = installDir / "poac.toml";
+  if (!fs::exists(poacToml) || !fs::is_regular_file(poacToml)) {
+    return "";
+  }
+  {
+    bool found = false;
+    for (const auto& entry : fs::directory_iterator(installDir / "src")) {
+      const fs::path& path = entry.path();
+      if (!SOURCE_FILE_EXTS.contains(path.extension())) {
+        continue;
+      }
+      if (path.filename().stem() == "main") {
+        // it's not library package, skip it...
+        return "";
+      }
+      if (path.filename().stem() == "lib") {
+        found = true;
+      }
+    }
+    if (!found) {
+      return "";
+    }
+  }
+  if (Command(
+          CLI_ARGS[0],
+          std::vector<std::string>(CLI_ARGS.begin() + 1, CLI_ARGS.end())
+      )
+          .setWorkingDirectory(installDir)
+          .setStdoutConfig(Command::IOConfig::Null)
+          .spawn()
+          .wait()
+      != 0) {
+    throw PoacError(
+        "failed to build dependency \"" + std::string{ name } + '"'
+    );
+  }
+
+  const auto data = toml::parse(poacToml);
+  const auto package = toml::find<Package>(data, "package");
+  return installDir / "poac-out" / (isDebug ? "debug" : "release")
+         / (package.name + ".a");
+}
+
+static DepMetadata
+installOnLocalDependency(
+    const std::string_view name, const fs::path& installDir, bool isDebug
+) {
+  const fs::path includeDir = installDir / "include";
+  std::string includes = "-isystem";
+
+  if (fs::exists(includeDir) && fs::is_directory(includeDir)
+      && !fs::is_empty(includeDir)) {
+    includes += includeDir.string();
+  } else {
+    includes += installDir.string();
+  }
+
+  return { .includes = includes, .libs = buildPoac(name, installDir, isDebug) };
+}
+
 DepMetadata
-GitDependency::install() const {
+GitDependency::install(bool isDebug) const {
   fs::path installDir = GIT_SRC_DIR / name;
   if (target.has_value()) {
     installDir += '-' + target.value();
@@ -628,22 +696,11 @@ GitDependency::install() const {
     );
   }
 
-  const fs::path includeDir = installDir / "include";
-  std::string includes = "-isystem";
-
-  if (fs::exists(includeDir) && fs::is_directory(includeDir)
-      && !fs::is_empty(includeDir)) {
-    includes += includeDir.string();
-  } else {
-    includes += installDir.string();
-  }
-
-  // Currently, no libs are supported.
-  return { .includes = includes, .libs = "" };
+  return installOnLocalDependency(name, installDir, isDebug);
 }
 
 DepMetadata
-PathDependency::install() const {
+PathDependency::install(bool isDebug) const {
   const fs::path installDir = fs::weakly_canonical(path);
   if (fs::exists(installDir) && !fs::is_empty(installDir)) {
     logger::debug("{} is already installed", name);
@@ -651,22 +708,11 @@ PathDependency::install() const {
     throw PoacError(installDir.string() + " can't be accessible as directory");
   }
 
-  const fs::path includeDir = installDir / "include";
-  std::string includes = "-isystem";
-
-  if (fs::exists(includeDir) && fs::is_directory(includeDir)
-      && !fs::is_empty(includeDir)) {
-    includes += includeDir.string();
-  } else {
-    includes += installDir.string();
-  }
-
-  // Currently, no libs are supported.
-  return { .includes = includes, .libs = "" };
+  return installOnLocalDependency(name, installDir, isDebug);
 }
 
 DepMetadata
-SystemDependency::install() const {
+SystemDependency::install(bool /*unused*/) const {
   const std::string pkgConfigVer = versionReq.toPkgConfigString(name);
   const Command cflagsCmd =
       Command("pkg-config").addArg("--cflags").addArg(pkgConfigVer);
@@ -682,7 +728,7 @@ SystemDependency::install() const {
 }
 
 std::vector<DepMetadata>
-installDependencies(const bool includeDevDeps) {
+installDependencies(const bool includeDevDeps, bool isDebug) {
   Manifest& manifest = Manifest::instance();
   if (!manifest.dependencies.has_value()) {
     manifest.dependencies = parseDependencies("dependencies");
@@ -695,7 +741,9 @@ installDependencies(const bool includeDevDeps) {
   if (manifest.dependencies.has_value()) {
     for (const auto& dep : manifest.dependencies.value()) {
       std::visit(
-          [&installed](auto&& arg) { installed.emplace_back(arg.install()); },
+          [&installed, isDebug](auto&& arg) {
+            installed.emplace_back(arg.install(isDebug));
+          },
           dep
       );
     }
@@ -703,7 +751,9 @@ installDependencies(const bool includeDevDeps) {
   if (includeDevDeps && manifest.devDependencies.has_value()) {
     for (const auto& dep : manifest.devDependencies.value()) {
       std::visit(
-          [&installed](auto&& arg) { installed.emplace_back(arg.install()); },
+          [&installed, isDebug](auto&& arg) {
+            installed.emplace_back(arg.install(isDebug));
+          },
           dep
       );
     }

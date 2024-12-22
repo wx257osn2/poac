@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <exception>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -59,6 +60,8 @@ getCli() noexcept {
   return cli;
 }
 
+std::vector<std::string> CLI_ARGS = { "dummy" };  // NOLINT
+
 int
 main(int argc, char* argv[]) {
   // Parse arguments (options should appear before the subcommand, as the help
@@ -66,6 +69,7 @@ main(int argc, char* argv[]) {
   // poac --verbose run --release help --color always --verbose
   // ^^^^^^^^^^^^^^ ^^^^^^^^^^^^^ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   // [global]       [run]         [help (under run)]
+  CLI_ARGS = std::vector<std::string>{ argv, argv + argc };
   const std::span<char* const> args(argv + 1, argv + argc);
   for (auto itr = args.begin(); itr != args.end(); ++itr) {
     if (const auto res = Cli::handleGlobalOpts(itr, args.end())) {
